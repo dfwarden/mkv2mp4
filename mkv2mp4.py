@@ -217,11 +217,13 @@ class VideoTrack:
 
 class AudioTrack:
 
-    def __init__(self, filename, audio_type, audio_channels):
+    def __init__(self, filename, audio_type, audio_channels, aac_passthrough):
         self.filename = filename
         self.audio_type = audio_type
         self.audio_channels = audio_channels
+        self.aac_passthrough = aac_passthrough
         self.output_filename = ""
+        self.used_existing = False
 
     # Convert the audio file to the target format.
     # Currently converts to AAC using ffmpeg.
@@ -242,23 +244,33 @@ class AudioTrack:
             if delete_temp_files:
                 os.remove(temp_wav_filename)
         elif audio_encoder == "ffmpeg":
-            print "%s: Transcoding audio using ffmpeg..." % timestamp()
             self.output_filename = re.sub('(\.[^\.]*)$', '.aac', self.filename)
-            log("Calling ffmpeg to transcode audio")
-            subprocess.call(["ffmpeg", \
+            # check to see whether file exists.
+            # if so, take existing file (useful if audio is already
+            # in aac format).
+	    
+            if os.path.exists(self.output_filename) and self.aac_passthrough:
+                self.used_existing = True
+                print "%s: Using existing audio without transcoding.\n" % timestamp()
+	    else:
+                print "%s: Transcoding audio using ffmpeg..." % timestamp()
+                log("Calling ffmpeg to transcode audio")
+                subprocess.call(["ffmpeg", \
                              "-i", self.filename, \
                              "-acodec", "libfaac", \
                              "-ac", "2", \
                              "-ab", "160000", \
                              self.output_filename])
-        print "%s: Audio transcoding complete.\n" % timestamp()
+                print "%s: Audio transcoding complete.\n" % timestamp()
+
         return self.output_filename
 
     # Delete intermediate files.
     def cleanup(self):
         if delete_temp_files:
             os.remove(self.filename)
-            os.remove(self.output_filename)
+            if not self.used_existing:
+                os.remove(self.output_filename)
 
 class OutputFile:
 
@@ -295,16 +307,18 @@ def main(argv):
     explicit_audio_encoder = False
     audio_encoder = "ffmpeg"
     delete_temp_files = True
+    aac_passthrough = False
 
     try:
         opts, args = getopt.getopt(argv, \
-                                   "a:d:hi:ko:", \
+                                   "a:d:hi:ko:p", \
                                    ["audio-encoder=", \
                                     "target-device=", \
                                     "help", \
                                     "input-file=", \
                                     "keep-temp-files", \
-                                    "output-file="])
+                                    "output-file=", \
+                                    "aac-passthrough"])
     except getopt.GetoptError:
         usage()
         sys.exit(2)
@@ -327,7 +341,9 @@ def main(argv):
         elif opt in ("-k", "--keep-temp-files"):
             delete_temp_files = False
         elif opt in ("-o", "--output-file"):
-            output_filename = arg     
+            output_filename = arg
+        elif opt in ("-p", "--aac-passthrough"):
+            aac_passthrough = True
 
     if input_file == "":
         print "Error: no input file specified"
@@ -398,7 +414,7 @@ def main(argv):
     # Convert the video and audio tracks.
     video_track = VideoTrack(video_track_name, video_track_fps)
     converted_video_filename = video_track.convert()
-    audio_track = AudioTrack(audio_track_name, audio_type, audio_channels)
+    audio_track = AudioTrack(audio_track_name, audio_type, audio_channels, aac_passthrough)
     converted_audio_filename = audio_track.convert()
 
     # Mux the video and audio tracks.
@@ -441,7 +457,9 @@ def usage():
 "                       'Xbox360': Microsoft Xbox 360 [default]\n" + \
 "  -h, --help         Print this help text.\n" + \
 "  -k, --keep-temp-files\n" + \
-"                     Keep intermediate files (default is not to).\n"
+"                     Keep intermediate files (default is not to).\n" + \
+"  -p, --aac-passthrough\n" + \
+"                     Use existing AAC audio if found (default is not to).\n"
 
 if __name__ == '__main__':
      main(sys.argv[1:])
